@@ -1,0 +1,18 @@
+usage: [BAM data stream] | ./ogap [options]
+
+Realigns alignments meeting specified criteria (number of gaps, mismatches) using
+Smith-Waterman parameters optimized to open gaps and eliminate mismatches and
+writes the stream of alignments as BAM on stdout.
+
+arguments:
+    -f --fasta-reference FILE  FASTA reference file to use for realignment (required)
+    -d --debug                 Print debugging information about realignment process
+    -w --flanking-window BP    The number of bases on the left and right to attempt to
+                               align to (default 300bp).
+    -c --max-position-delta    Maximum number of bases the start or end of the alignment
+                               may change when realigning (default 200bp)
+    -m --match-score           The match score (default 10.0)
+    -n --mismatch-score        The mismatch score (default -20.0)
+    -g --gap-open-penalty      The gap open penalty (default 15.0)
+    -e --gap-extend-penalty    The gap extend penalty (default 0.0)
+    -s --suppress-output       Don't output BAM on stdout
