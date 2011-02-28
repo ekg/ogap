@@ -20,6 +20,42 @@
 using namespace std;
 using namespace BamTools;
 
+
+pair<int, int> countMismatchesAndGaps(BamAlignment& alignment, string referenceSequence) {
+
+    pair<int, int> mgps = make_pair(0, 0);
+    int sp = 0;
+    int rp = 0;
+    for (vector<CigarOp>::const_iterator c = alignment.CigarData.begin();
+        c != alignment.CigarData.end(); ++c) {
+        int l = c->Length;
+        char t = c->Type;
+        if (t == 'M') { // match or mismatch
+            for (int i = 0; i < l; ++i) {
+                if (alignment.QueryBases.at(rp) != referenceSequence.at(sp))
+                    ++mgps.first;
+                ++sp;
+                ++rp;
+            }
+        } else if (t == 'D') { // deletion
+            ++mgps.second;
+            sp += l;  // update reference sequence position
+        } else if (t == 'I') { // insertion
+            ++mgps.second;
+            rp += l;  // update read position
+        } else if (t == 'S') { // soft clip, clipped sequence present in the read not matching the reference
+            rp += l;
+        } else if (t == 'H') { // hard clip on the read, clipped sequence is not present in the read
+        } else if (t == 'N') { // skipped region in the reference not present in read, aka splice
+            sp += l;
+        }
+    }
+
+    return mgps;
+
+}
+
+
 void printUsage(char** argv) {
     cerr << "usage: [BAM data stream] | " << argv[0] << " [options]" << endl
          << endl
@@ -200,7 +236,9 @@ int main(int argc, char** argv) {
             // if not, continue
             if (hasindel) {
 
-                string ref = reference.getSubSequence(referenceIDToName[alignment.RefID], alignment.Position - flanking_window, length + 2 * flanking_window);
+                const string ref = reference.getSubSequence(referenceIDToName[alignment.RefID], alignment.Position - flanking_window, length + 2 * flanking_window);
+
+                pair<int, int> mgps_before = countMismatchesAndGaps(alignment, ref.substr(flanking_window, length));
 
                 const unsigned int referenceLen = ref.size();
                 const unsigned int queryLen     = alignment.QueryBases.size();
@@ -270,13 +308,19 @@ int main(int argc, char** argv) {
                 int alignmentEndDelta = alignmentStartDelta + alignmentLengthDelta;
 
                 // if we have a delta, but it's within bounds, modify the alignment
-                if (alignmentStartDelta <= maxPositionDelta && alignmentEndDelta <= maxPositionDelta) {
+                pair<int, int> mgps_after = countMismatchesAndGaps(alignment, ref.substr(flanking_window, length));
+
+                if (((mgps_after.first < mgps_before.first
+                        && mgps_after.second <= mgps_before.second)
+                        ||
+                    (mgps_after.first <= mgps_before.first
+                        && mgps_after.second < mgps_before.second))
+                    && (alignmentStartDelta <= maxPositionDelta
+                        && alignmentEndDelta <= maxPositionDelta)) {
                     alignment.CigarData = cigarData;
                     alignment.Position += alignmentStartDelta;
                 }
-
             }
-
         }
 
         // write every alignment unless we are suppressing output
