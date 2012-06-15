@@ -9,58 +9,59 @@ MYBINS = bamgrouper
 CC = gcc
 CXX = g++
 CFLAGS = -Wall -O3
-CXXFLAGS = -Wall -O3
+#CXXFLAGS = -Wall -O3
 #LDENV = -Llib/
 #LDFLAGS = -lbamtools
-LIBS = -lz -lm
+LIBS = -lz -lm -lbamtools
 
-OBJECTS=BamAlignment.o \
-		BamMultiReader.o \
-		BamReader.o \
-		BamIndex.o \
-		BamWriter.o \
-		BGZF.o \
-		Fasta.o \
-		BandedSmithWaterman.o \
-		SmithWatermanGotoh.o \
-		split.o
+BAMTOOLS_ROOT=bamtools
+BAMTOOLS_LIB_DIR=bamtools/lib
+
+CXXFLAGS=-Wall -O3 -I$(BAMTOOLS_ROOT)/include -L./ #-L$(BAMTOOLS_ROOT)/lib
+
+SMITHWATERMAN = smithwaterman/SmithWatermanGotoh.o
+REPEATS = smithwaterman/Repeats.o
+INDELALLELE = smithwaterman/IndelAllele.o
+DISORDER = smithwaterman/disorder.c
+LEFTALIGN = smithwaterman/LeftAlign.o
+FASTAHACK = fastahack/Fasta.o
+
+OBJECTS=split.o
 
 all: ogap
 
 clean:
-	rm *.o ogap
+	rm -f ogap *.o
+	cd fastahack && $(MAKE) clean
+	cd bamtools/build && $(MAKE) clean
+	cd smithwaterman && $(MAKE) clean
 
 .PHONY: all clean
 
-BamAlignment.o: BamAlignment.cpp BamAlignment.h BamAux.h
-	$(CC) $(CFLAGS) -c BamAlignment.cpp 
 
-BamMultiReader.o: BamMultiReader.cpp BamMultiReader.h BamReader.cpp BamReader.h BamAux.h
-	$(CC) $(CFLAGS) -c BamMultiReader.cpp 	
 
-BamReader.o: BamReader.cpp BamReader.h BamAux.h
-	$(CC) $(CFLAGS) -c BamReader.cpp 	
+# builds bamtools static lib, and copies into root
+libbamtools.a:
+	cd $(BAMTOOLS_ROOT) && mkdir -p build && cd build && cmake .. && make
+	cp bamtools/lib/libbamtools.a ./
 
-BamWriter.o: BamWriter.cpp BamReader.h BamAux.h
-	$(CC) $(CFLAGS) -c BamWriter.cpp 	
 
-BamIndex.o: BamIndex.cpp BamIndex.h BamAux.h
-	$(CC) $(CFLAGS) -c BamIndex.cpp 	
+$(SMITHWATERMAN):
+	cd smithwaterman && $(MAKE)
 
-BGZF.o: BGZF.cpp BGZF.h
-	$(CC) $(CFLAGS) -c BGZF.cpp
+$(DISORDER): $(SMITHWATERMAN)
 
-Fasta.o: Fasta.h Fasta.cpp
-	$(CC) $(CFLAGS) -c Fasta.cpp
+$(REPEATS): $(SMITHWATERMAN)
 
-BandedSmithWaterman.o: BandedSmithWaterman.cpp BandedSmithWaterman.h
-	$(CC) $(CFLAGS) -c BandedSmithWaterman.cpp
+$(LEFTALIGN): $(SMITHWATERMAN)
 
-SmithWatermanGotoh.o: SmithWatermanGotoh.cpp SmithWatermanGotoh.h
-	$(CC) $(CFLAGS) -c SmithWatermanGotoh.cpp
+$(INDELALLELE): $(SMITHWATERMAN)
+
+$(FASTAHACK):
+	cd fastahack && $(MAKE)
 
 split.o: split.h split.cpp
-	$(CC) $(CFLAGS) -c split.cpp
+	$(CXX) $(CFLAGS) -c split.cpp
 
-ogap: ogap.o $(OBJECTS)
-	$(LDENV) $(CXX) $(CXXFLAGS) -o $@ ogap.o $(OBJECTS) $(LDFLAGS) $(LIBS)
+ogap: ogap.cpp $(OBJECTS) $(SMITHWATERMAN) $(FASTAHACK) $(DISORDER) $(REPEATS) $(LEFTALIGN) $(INDELALLELE) libbamtools.a
+	$(CXX) $(CXXFLAGS) -o $@ ogap.cpp $(OBJECTS) $(LDFLAGS) $(SMITHWATERMAN) $(FASTAHACK) $(DISORDER) $(REPEATS) $(LEFTALIGN) $(INDELALLELE) $(LIBS) 
