@@ -59,20 +59,21 @@ void printUsage(char** argv) {
     cerr << "usage: [BAM data stream] | " << argv[0] << " [options]" << endl
          << endl
          << "Realigns alignments meeting specified criteria (number of gaps, mismatches) using" << endl
-         << "Smith-Waterman parameters optimized to open gaps and eliminate mismatches and" << endl
-         << "writes the stream of alignments as BAM on stdout." << endl
+         << "a repeat-aware Smith-Waterman alignment algorithm optimized to open gaps in low-entropy" << endl
+	 << "sequence.  New alignments are kept if the alignment reduces the overall number of" << endl
+	 << "mismatches, gaps, and soft-clipped bases relative to the initial alignment while not" << endl
+	 << "increasing the number of mismatches.  Realigned alignments are written as BAM on stdout." << endl
          << endl
          << "arguments:" << endl
          << "    -f --fasta-reference FILE  FASTA reference file to use for realignment (required)" << endl
          << "    -d --debug                 Print debugging information about realignment process" << endl
          << "    -w --flanking-window N     The number of bases on the left and right to attempt to" << endl
-         << "                               align to (default 300bp)." << endl
-         << "    -p --max-position-delta N  Maximum number of bases the start or end of the alignment" << endl
-         << "                               may change when realigning (default 200bp)" << endl
+         << "                               align to (default 50bp).  This limits the maximum detectable" << endl
+	 << "                               indel length." << endl
 	 << "    -x --mismatch-rate-threshold N   Trigger realignment if the mismatch rate is greater" << endl
 	 << "                                     than N (default 0.03)" << endl
 	 << "    -c --mismatch-count-threshold N  Trigger realignment if the mismatch count is greater" << endl
-	 << "                                     than N (default -1, unbounded)" << endl
+	 << "                                     than or equal to N (default -1, unbounded)" << endl
          << "    -m --match-score N         The match score (default 10.0)" << endl
          << "    -n --mismatch-score N      The mismatch score (default -9.0)" << endl
          << "    -g --gap-open-penalty N    The gap open penalty (default 15.0)" << endl
@@ -91,7 +92,7 @@ int main(int argc, char** argv) {
     bool has_ref = false;
     bool suppress_output = false;
     bool debug = false;
-    int flanking_window = 200;
+    int flanking_window = 50;
 
     float matchScore = 10.0f;
     float mismatchScore = -9.0f;
@@ -101,8 +102,6 @@ int main(int argc, char** argv) {
     bool useEntropy = false;
     bool useRepeatGapExtendPenalty = true;
     float repeatGapExtendPenalty = 15.0f;
-
-    int maxPositionDelta = 200;
 
     float mismatchRateThreshold = 0.03f;
     int mismatchCountThreshold = -1;
@@ -119,7 +118,6 @@ int main(int argc, char** argv) {
             {"debug", no_argument, 0, 'd'},
             {"fasta-reference", required_argument, 0, 'f'},
             {"flanking-window", required_argument, 0, 'w'},
-            {"max-position-delta", required_argument, 0, 'p'},
 	    {"mismatch-rate-threshold", required_argument, 0, 'x'},
 	    {"mismatch-count-threshold", required_argument, 0, 't'},
             {"match-score",  required_argument, 0, 'm'},
@@ -134,7 +132,7 @@ int main(int argc, char** argv) {
 
         int option_index = 0;
 
-        c = getopt_long (argc, argv, "hszdf:m:n:g:e:w:c:x:R:p:",
+        c = getopt_long (argc, argv, "hszdf:m:n:g:e:w:c:x:R:",
                          long_options, &option_index);
 
         /* Detect the end of the options. */
@@ -173,10 +171,6 @@ int main(int argc, char** argv) {
 
             case 'w':
                 flanking_window = atoi(optarg);
-                break;
-
-            case 'p':
-                maxPositionDelta = atoi(optarg);
                 break;
 
             case 'm':
@@ -242,8 +236,11 @@ int main(int argc, char** argv) {
     }
 
     BamAlignment alignment;
+    map<long unsigned int, vector<BamAlignment> > alignmentSortQueue;
 
     while (reader.GetNextAlignment(alignment)) {
+
+	long unsigned int initialAlignmentPosition = alignment.Position;
         
 	// todo, align unmapped reads
         if (alignment.IsMapped()) {
@@ -253,6 +250,7 @@ int main(int argc, char** argv) {
 
             // do we meet criteria for realignment?
 
+	    // get the overlapping reference sequnce to determine mismatches
 	    const string ref = reference.getSubSequence(referenceIDToName[alignment.RefID],
 							max(0, alignment.Position - flanking_window),
 							length + 2 * flanking_window);
@@ -271,7 +269,7 @@ int main(int argc, char** argv) {
 
             if (gapsBefore > 0
 		|| softclipsBefore > 0
-		|| (mismatchCountThreshold > -1 && mismatchesBefore > mismatchCountThreshold)
+		|| (mismatchCountThreshold > -1 && mismatchesBefore >= mismatchCountThreshold)
 		|| (float) mismatchesBefore / (float) alignment.QueryBases.size() > mismatchRateThreshold
 		) {
 
@@ -377,12 +375,12 @@ int main(int argc, char** argv) {
 		if (mismatchesAfter <= mismatchesBefore
 		    && mismatchesAfter + gapsAfter + softclipsAfter
 		    <= mismatchesBefore + gapsBefore + softclipsBefore
-                    && (alignmentStartDelta <= maxPositionDelta
-                        && alignmentEndDelta <= maxPositionDelta
+                    && (alignmentStartDelta <= flanking_window  // don't accept -pos alignments
+                        && alignmentEndDelta <= flanking_window
 			&& alignment.Position + alignmentStartDelta >= 0)) {
 		    //cerr << "adjusting ... " << endl;
-		    //if (abs(alignmentStartDelta) > deletedBases) { // weird... why?
-			/*
+		    /*
+		    if (abs(alignmentStartDelta) > deletedBases) { // weird... why?
 			cerr << "odd move of " << alignmentStartDelta << " for " << alignment.Name << endl;
 			for (vector<CigarOp>::iterator o = cigarData.begin(); o != cigarData.end(); ++o)
 			    cerr << o->Length << o->Type;
@@ -390,8 +388,8 @@ int main(int argc, char** argv) {
 			cerr << alignment.Position << endl;
 			cerr << ref.substr(referencePos, realignmentLength) << endl;
 			cerr << alignment.AlignedBases << endl << endl;
-			*/
-	            //}
+	            }
+		    */
 		    alignment.CigarData = cigarData;
 		    alignment.Position += alignmentStartDelta;
                 }
@@ -401,10 +399,36 @@ int main(int argc, char** argv) {
         }
 
         // write every alignment unless we are suppressing output
-        if (!suppress_output)
-            writer.SaveAlignment(alignment);
+        if (!suppress_output) {
+	    alignmentSortQueue[alignment.Position].push_back(alignment);
+	    // ensure correct order if alignments move
+	    if (initialAlignmentPosition > (unsigned int) flanking_window) {
+		long unsigned int maxOutputPos = initialAlignmentPosition - flanking_window;
+		map<long unsigned int, vector<BamAlignment> >::iterator p = alignmentSortQueue.begin();
+		for ( ; p != alignmentSortQueue.end(); ++p) {
+		    if (p->first > maxOutputPos) {
+			break; // no more to do
+		    } else {
+			for (vector<BamAlignment>::iterator a = p->second.begin(); a != p->second.end(); ++a)
+			    writer.SaveAlignment(*a);
+		    }
+		}
+		if (p != alignmentSortQueue.begin())
+		    alignmentSortQueue.erase(alignmentSortQueue.begin(), p);
+	    }
+	}
 
     }
+
+    if (!suppress_output) {
+	for (map<long unsigned int, vector<BamAlignment> >::iterator p = alignmentSortQueue.begin();
+	     p != alignmentSortQueue.end(); ++p) {
+	    for (vector<BamAlignment>::iterator a = p->second.begin(); a != p->second.end(); ++a)
+		writer.SaveAlignment(*a);
+	}
+	alignmentSortQueue.clear();
+    }
+
 
     reader.Close();
     if (!suppress_output)
