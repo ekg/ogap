@@ -22,34 +22,55 @@ using namespace std;
 using namespace BamTools;
 
 
-void countMismatchesAndGaps(BamAlignment& alignment, vector<CigarOp>& cigarData, string referenceSequence, int& mismatches, int& gaps, int& softclips) {
+short qualityChar2ShortInt(char c) {
+    return static_cast<short>(c) - 33;
+}
+
+void countMismatchesAndGaps(
+    BamAlignment& alignment,
+    vector<CigarOp>& cigarData,
+    string referenceSequence,
+    int& mismatches,
+    int& gaps,
+    int& gapslen,
+    int& softclips,
+    int& mismatchQsum,
+    int& softclipQsum
+    ) {
 
     int sp = 0;
     int rp = 0;
     for (vector<CigarOp>::const_iterator c = cigarData.begin();
-        c != cigarData.end(); ++c) {
+	 c != cigarData.end(); ++c) {
         int l = c->Length;
         char t = c->Type;
         if (t == 'M') { // match or mismatch
             for (int i = 0; i < l; ++i) {
-                if (alignment.QueryBases.at(rp) != referenceSequence.at(sp))
+                if (alignment.QueryBases.at(rp) != referenceSequence.at(sp)) {
                     ++mismatches;
+		    mismatchQsum += qualityChar2ShortInt(alignment.Qualities.at(rp));
+		}
                 ++sp;
                 ++rp;
             }
         } else if (t == 'D') { // deletion
             ++gaps;
+	    gapslen += l;
             sp += l;  // update reference sequence position
         } else if (t == 'I') { // insertion
 	    ++gaps;
-            rp += l;  // update read position
-        } else if (t == 'S') { // soft clip, clipped sequence present in the read not matching the reference
+	    gapslen += l;
+	    rp += l;  // update read position
+	} else if (t == 'S') { // soft clip, clipped sequence present in the read not matching the reference
 	    softclips += l;
-            rp += l;
-        } else if (t == 'H') { // hard clip on the read, clipped sequence is not present in the read
-        } else if (t == 'N') { // skipped region in the reference not present in read, aka splice
-            sp += l;
-        }
+	    for (int i = 0; i < l; ++i) {
+		softclipQsum += qualityChar2ShortInt(alignment.Qualities.at(rp));
+		++rp;
+	    }
+	} else if (t == 'H') { // hard clip on the read, clipped sequence is not present in the read
+	} else if (t == 'N') { // skipped region in the reference not present in read, aka splice
+	    sp += l;
+	}
     }
 
 }
@@ -57,31 +78,42 @@ void countMismatchesAndGaps(BamAlignment& alignment, vector<CigarOp>& cigarData,
 
 void printUsage(char** argv) {
     cerr << "usage: [BAM data stream] | " << argv[0] << " [options]" << endl
-         << endl
-         << "Realigns alignments meeting specified criteria (number of gaps, mismatches) using" << endl
-         << "a repeat-aware Smith-Waterman alignment algorithm optimized to open gaps in low-entropy" << endl
+	 << endl
+	 << "Realigns alignments meeting specified criteria (number of gaps, mismatches) using" << endl
+	 << "a repeat-aware Smith-Waterman alignment algorithm optimized to open gaps in low-entropy" << endl
 	 << "sequence.  New alignments are kept if the alignment reduces the overall number of" << endl
 	 << "mismatches, gaps, and soft-clipped bases relative to the initial alignment while not" << endl
 	 << "increasing the number of mismatches.  Realigned alignments are written as BAM on stdout." << endl
-         << endl
-         << "arguments:" << endl
-         << "    -f --fasta-reference FILE  FASTA reference file to use for realignment (required)" << endl
-         << "    -d --debug                 Print debugging information about realignment process" << endl
-         << "    -w --flanking-window N     The number of bases on the left and right to attempt to" << endl
-         << "                               align to (default 50bp).  This limits the maximum detectable" << endl
+	 << endl
+	 << "arguments:" << endl
+	 << "    -f --fasta-reference FILE  FASTA reference file to use for realignment (required)" << endl
+	 << "    -d --debug                 Print debugging information about realignment process" << endl
+	 << "    -w --flanking-window N     The number of bases on the left and right to attempt to" << endl
+	 << "                               align to (default 50bp).  This limits the maximum detectable" << endl
 	 << "                               indel length." << endl
-	 << "    -x --mismatch-rate-threshold N   Trigger realignment if the mismatch rate is greater" << endl
-	 << "                                     than N (default 0.03)" << endl
-	 << "    -c --mismatch-count-threshold N  Trigger realignment if the mismatch count is greater" << endl
-	 << "                                     than or equal to N (default -1, unbounded)" << endl
-         << "    -m --match-score N         The match score (default 10.0)" << endl
-         << "    -n --mismatch-score N      The mismatch score (default -9.0)" << endl
-         << "    -g --gap-open-penalty N    The gap open penalty (default 15.0)" << endl
-         << "    -e --gap-extend-penalty N  The gap extend penalty (default 6.66)" << endl
-	 << "    -z, --entropy-gap-open     use entropy scaling for the gap open penalty" << endl
-	 << "    -R, --repeat-gap-extend N  penalize non-repeat-unit gaps in repeat sequence" << endl
+	 << "    -x --mismatch-rate N       Trigger realignment if the mismatch rate is greater" << endl
+	 << "                               than N (default 0.03)" << endl
+	 << "    -c --mismatch-count N      Trigger realignment if the mismatch count is greater" << endl
+	 << "                               than or equal to N (default -1, unbounded)" << endl
+	 << "    -q --soft-clip-count N     Trigger realignment if there are more than N softclips" << endl
+	 << "                               (default -1, unbounded)" << endl
+	 << "    -C --mismatch-qsum N       Trigger realignment if the sum of quality scores of" << endl
+	 << "                               mismatched bases is >= N" << endl
+	 << "    -Q --soft-clip-qsum N      Trigger realignment if the sum of quality scores of" << endl
+	 << "                               soft clipped bases is >= N" << endl
+	 << "    -S --soft-clip-limit N     Only accept realignments if they have <= N soft clips" << endl
+	 << "    -i --max-gap-increase N    Only allow the introduction of up to N gaps" << endl
+	 << "                               soft-clipped bases is >= N (default 3)" << endl
+	 << "    -M --min-mapping-quality N Only realign reasd with MQ > N (default 0)" << endl
+	 << "    -m --match-score N         The match score (default 10.0)" << endl
+	 << "    -n --mismatch-score N      The mismatch score (default -9.0)" << endl
+	 << "    -g --gap-open-penalty N    The gap open penalty (default 15.0)" << endl
+	 << "    -e --gap-extend-penalty N  The gap extend penalty (default 6.66)" << endl
+	 << "    -z --entropy-gap-open     use entropy scaling for the gap open penalty" << endl
+	 << "    -R --repeat-gap-extend N  penalize non-repeat-unit gaps in repeat sequence" << endl
 	 << "                               (default 15.0, set to 0 to disable)" << endl
-         << "    -s --suppress-output       Don't output BAM on stdout" << endl;
+	 << "    -s --suppress-output       Don't output BAM on stdout" << endl
+	 << "    -A --accept-all            Accept all realignments, regardless of quality" << endl;   
 }
 
 int main(int argc, char** argv) {
@@ -105,6 +137,24 @@ int main(int argc, char** argv) {
 
     float mismatchRateThreshold = 0.03f;
     int mismatchCountThreshold = -1;
+
+    float mismatchRateAfterLimit = 0.1f;
+
+    int softclipCountThreshold = 0;
+
+    int mismatchQualitySumThreshold = -1;
+    int softclipQualitySumThreshold = -1;
+
+    bool acceptAllRealignments = false;
+
+    float acceptGapsToSoftclips = 5.0f;
+    float acceptGapsToMismatches = 1.0f;
+
+    int maxGapIncrease = 3;
+
+    int minMappingQuality = 0;
+
+    int softclipLimit = -1;
     
     if (argc < 2) {
         printUsage(argv);
@@ -118,8 +168,11 @@ int main(int argc, char** argv) {
             {"debug", no_argument, 0, 'd'},
             {"fasta-reference", required_argument, 0, 'f'},
             {"flanking-window", required_argument, 0, 'w'},
-	    {"mismatch-rate-threshold", required_argument, 0, 'x'},
-	    {"mismatch-count-threshold", required_argument, 0, 't'},
+	    {"mismatch-rate", required_argument, 0, 'x'},
+	    {"mismatch-count", required_argument, 0, 't'},
+	    {"soft-clip-count", required_argument, 0, 'q'},
+	    {"mismatch-qsum", required_argument, 0, 'C'},
+	    {"soft-clip-qsum", required_argument, 0, 'Q'},
             {"match-score",  required_argument, 0, 'm'},
             {"mismatch-score",  required_argument, 0, 'n'},
             {"gap-open-penalty",  required_argument, 0, 'g'},
@@ -127,12 +180,16 @@ int main(int argc, char** argv) {
 	    {"entropy-gap-open", no_argument, 0, 'z'},
 	    {"repeat-gap-extend", no_argument, 0, 'R'},
             {"suppress-output", no_argument, 0, 's'},
+	    {"accept-all", no_argument, 0, 'A'},
+	    {"max-gap-increase", required_argument, 0, 'i'},
+	    {"min-mapping-quality", required_argument, 0, 'M'},
+	    {"soft-clip-limit", required_argument, 0, 'S'},
             {0, 0, 0, 0}
         };
 
         int option_index = 0;
 
-        c = getopt_long (argc, argv, "hszdf:m:n:g:e:w:c:x:R:",
+        c = getopt_long (argc, argv, "hszAdf:m:n:g:e:w:c:x:R:q:C:Q:i:M:S:",
                          long_options, &option_index);
 
         /* Detect the end of the options. */
@@ -167,6 +224,34 @@ int main(int argc, char** argv) {
 
 	    case 'c':
 		mismatchCountThreshold = atoi(optarg);
+		break;
+
+            case 'q':
+		softclipCountThreshold = atoi(optarg);
+		break;
+
+            case 'S':
+		softclipLimit = atoi(optarg);
+		break;
+
+	    case 'C':
+		mismatchQualitySumThreshold = atoi(optarg);
+		break;
+
+	    case 'M':
+		minMappingQuality = atoi(optarg);
+		break;
+
+	    case 'A':
+		acceptAllRealignments = true;
+		break;
+
+            case 'Q':
+		softclipQualitySumThreshold = atoi(optarg);
+		break;
+
+	    case 'i':
+		maxGapIncrease = atoi(optarg);
 		break;
 
             case 'w':
@@ -241,9 +326,9 @@ int main(int argc, char** argv) {
     while (reader.GetNextAlignment(alignment)) {
 
 	long unsigned int initialAlignmentPosition = alignment.Position;
-        
+
 	// todo, align unmapped reads
-        if (alignment.IsMapped()) {
+        if (alignment.IsMapped() && alignment.MapQuality >= minMappingQuality) {
 
             int endpos = alignment.GetEndPosition();
             int length = endpos - alignment.Position + 1;
@@ -255,21 +340,33 @@ int main(int argc, char** argv) {
 							max(0, alignment.Position - flanking_window),
 							length + 2 * flanking_window);
 
+	    if (debug) cerr << ref << endl;
+	    if (debug) cerr << alignment.QueryBases << endl;
+
 	    int mismatchesBefore = 0;
 	    int gapsBefore = 0;
+	    int gapslenBefore = 0;
 	    int softclipsBefore = 0;
+	    int mismatchQsumBefore = 0;
+	    int softclipQsumBefore = 0;
 	    countMismatchesAndGaps(alignment,
 				   alignment.CigarData,
 				   ref.substr(flanking_window, length),
 				   mismatchesBefore,
 				   gapsBefore,
-				   softclipsBefore);
+				   gapslenBefore,
+				   softclipsBefore,
+				   mismatchQsumBefore,
+				   softclipQsumBefore);
+
 
 	    // if we meet the criteria, attempt to realign
 
             if (gapsBefore > 0
-		|| softclipsBefore > 0
+		|| (softclipCountThreshold > -1 && softclipsBefore > softclipCountThreshold)
 		|| (mismatchCountThreshold > -1 && mismatchesBefore >= mismatchCountThreshold)
+		|| (softclipQualitySumThreshold > -1 && softclipQsumBefore >= softclipQualitySumThreshold)
+		|| (mismatchQualitySumThreshold > -1 && mismatchQsumBefore >= mismatchQualitySumThreshold)
 		|| (float) mismatchesBefore / (float) alignment.QueryBases.size() > mismatchRateThreshold
 		) {
 
@@ -354,31 +451,61 @@ int main(int argc, char** argv) {
 
 		int mismatchesAfter = 0;
 		int gapsAfter = 0;
+		int gapslenAfter = 0;
 		int softclipsAfter = 0;
+		int mismatchQsumAfter = 0;
+		int softclipQsumAfter = 0;
 		countMismatchesAndGaps(alignment,
 				       cigarData,
 				       ref.substr(referencePos, realignmentLength),
 				       mismatchesAfter,
 				       gapsAfter,
-				       softclipsAfter);
-		/*
-		cerr << cigar << endl;
-		cerr << alignment.QueryBases << endl;
-		cerr << ref.substr(referencePos, realignmentLength) << endl;
-		cerr << "before: " << mismatchesBefore << " mismatches, " << gapsBefore << " gaps, and " << softclipsBefore << " softclips" << endl;
-		cerr << "after:  " << mismatchesAfter << " mismatches, " << gapsAfter << " gaps, and " << softclipsAfter << " softclips" << endl;
-		cerr << "alignment delta: " << alignmentStartDelta << " length delta " << alignmentLengthDelta << " end delta " << alignmentEndDelta << endl;
-		*/
+				       gapslenAfter,
+				       softclipsAfter,
+				       mismatchQsumAfter,
+				       softclipQsumAfter);
+
+
+		if (debug) {
+		    cerr << cigar << endl;
+		    cerr << alignment.QueryBases << endl;
+		    cerr << ref.substr(referencePos, realignmentLength) << endl;
+		    cerr << "before: " << mismatchesBefore << " mismatches, " << gapsBefore << " gaps, and " << softclipsBefore << " softclips" << endl;
+		    cerr << "after:  " << mismatchesAfter << " mismatches, " << gapsAfter << " gaps, and " << softclipsAfter << " softclips" << endl;
+		    cerr << "alignment delta: " << alignmentStartDelta << " length delta " << alignmentLengthDelta << " end delta " << alignmentEndDelta << endl;
+		}
+
+		     /*
+		     && (!(softclipsBefore > softclipsAfter && gapsBefore < gapsAfter)
+			 || ((softclipsBefore > softclipsAfter && gapsBefore < gapsAfter) &&
+			 (float) (softclipsBefore - softclipsAfter)
+			     / (float) (gapsBefore - gapsAfter) > acceptGapsToSoftclips)
+		     && (float) variancesAfter
+			 / (float) alignment.QueryBases.size() < mismatchRateAfterLimit
+		     */
+
+
 
 		// reduce mismatches or maintain them,
 		// reduce the sum of variances in the alignment
-		if (mismatchesAfter <= mismatchesBefore
-		    && mismatchesAfter + gapsAfter + softclipsAfter
-		    <= mismatchesBefore + gapsBefore + softclipsBefore
-                    && (alignmentStartDelta <= flanking_window  // don't accept -pos alignments
-                        && alignmentEndDelta <= flanking_window
-			&& alignment.Position + alignmentStartDelta >= 0)) {
-		    //cerr << "adjusting ... " << endl;
+		int variancesBefore = mismatchesBefore + gapsBefore + softclipsBefore;
+		int variancesAfter = mismatchesAfter + gapsAfter + softclipsAfter;
+		//if (debug) cerr << mismatchQsumAfter + softclipQsumAfter << " ? < " << mismatchQsumBefore + softclipQsumBefore << endl;
+		if (acceptAllRealignments ||
+		    //(mismatchQsumAfter <= mismatchQsumBefore
+		    // && softclipQsumAfter <= softclipQsumBefore
+		    (mismatchQsumAfter + softclipQsumAfter <= mismatchQsumBefore + softclipQsumBefore
+		     && (softclipLimit == -1 || softclipLimit >= 0 && softclipsAfter <= softclipLimit)
+		     && ((gapsBefore == gapsAfter && gapslenAfter <= gapslenBefore)
+			 || gapsAfter - gapsBefore <= maxGapIncrease)
+		     //&& variancesAfter <= variancesBefore
+		     //&& mismatchesAfter + gapsAfter <= mismatchesBefore + gapsBefore
+		     //&& (alignmentStartDelta <= flanking_window  // don't accept -pos alignments
+		     //    && alignmentEndDelta <= flanking_window
+		     //    && alignment.Position + alignmentStartDelta >= 0))) {
+			)) {
+
+		    if (debug) cerr << "adjusting ... " << endl;
 		    /*
 		    if (abs(alignmentStartDelta) > deletedBases) { // weird... why?
 			cerr << "odd move of " << alignmentStartDelta << " for " << alignment.Name << endl;
@@ -394,7 +521,7 @@ int main(int argc, char** argv) {
 		    alignment.Position += alignmentStartDelta;
                 }
 
-		//cerr << endl;
+		if (debug) cerr << endl;
             }
         }
 
@@ -417,7 +544,6 @@ int main(int argc, char** argv) {
 		    alignmentSortQueue.erase(alignmentSortQueue.begin(), p);
 	    }
 	}
-
     }
 
     if (!suppress_output) {
