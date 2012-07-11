@@ -330,15 +330,26 @@ int main(int argc, char** argv) {
 	// todo, align unmapped reads
         if (alignment.IsMapped() && alignment.MapQuality >= minMappingQuality) {
 
-            int endpos = alignment.GetEndPosition();
-            int length = endpos - alignment.Position + 1;
+	    string ref;
+
+	    try {
+
+	    int softclipBegin = 0;
+	    int softclipEnd = 0;
+	    if (alignment.CigarData.front().Type == Constants::BAM_CIGAR_SOFTCLIP_CHAR)
+		softclipBegin = alignment.CigarData.front().Length;
+	    if (alignment.CigarData.back().Type == Constants::BAM_CIGAR_SOFTCLIP_CHAR)
+		softclipEnd = alignment.CigarData.back().Length;
+
+            int endpos = alignment.GetEndPosition() + softclipEnd;
+            int length = endpos - (alignment.Position - softclipBegin);  // 0-based half-open interval
 
             // do we meet criteria for realignment?
 
 	    // get the overlapping reference sequnce to determine mismatches
-	    const string ref = reference.getSubSequence(referenceIDToName[alignment.RefID],
-							max(0, alignment.Position - flanking_window),
-							length + 2 * flanking_window);
+	    ref = reference.getSubSequence(referenceIDToName[alignment.RefID],
+					   max(0, alignment.Position - flanking_window),
+					   length + 2 * flanking_window);
 
 	    if (debug) cerr << ref << endl;
 	    if (debug) cerr << alignment.QueryBases << endl;
@@ -488,14 +499,14 @@ int main(int argc, char** argv) {
 
 		// reduce mismatches or maintain them,
 		// reduce the sum of variances in the alignment
-		int variancesBefore = mismatchesBefore + gapsBefore + softclipsBefore;
-		int variancesAfter = mismatchesAfter + gapsAfter + softclipsAfter;
+		//int variancesBefore = mismatchesBefore + gapsBefore + softclipsBefore;
+		//int variancesAfter = mismatchesAfter + gapsAfter + softclipsAfter;
 		//if (debug) cerr << mismatchQsumAfter + softclipQsumAfter << " ? < " << mismatchQsumBefore + softclipQsumBefore << endl;
 		if (acceptAllRealignments ||
 		    //(mismatchQsumAfter <= mismatchQsumBefore
 		    // && softclipQsumAfter <= softclipQsumBefore
 		    (mismatchQsumAfter + softclipQsumAfter <= mismatchQsumBefore + softclipQsumBefore
-		     && (softclipLimit == -1 || softclipLimit >= 0 && softclipsAfter <= softclipLimit)
+		     && (softclipLimit == -1 || (softclipLimit >= 0 && softclipsAfter <= softclipLimit))
 		     && ((gapsBefore == gapsAfter && gapslenAfter <= gapslenBefore)
 			 || gapsAfter - gapsBefore <= maxGapIncrease)
 		     //&& variancesAfter <= variancesBefore
@@ -523,6 +534,11 @@ int main(int argc, char** argv) {
 
 		if (debug) cerr << endl;
             }
+
+	} catch (...) {
+		cerr << "exception when realigning " << alignment.Name << " at position " << referenceIDToName[alignment.RefID] << ":" << alignment.Position << " " << ref << " " << alignment.QueryBases << endl;
+	}
+
         }
 
         // write every alignment unless we are suppressing output
@@ -544,6 +560,7 @@ int main(int argc, char** argv) {
 		    alignmentSortQueue.erase(alignmentSortQueue.begin(), p);
 	    }
 	}
+
     }
 
     if (!suppress_output) {
