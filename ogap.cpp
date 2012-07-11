@@ -334,6 +334,7 @@ int main(int argc, char** argv) {
 
 	    try {
 
+		/*
 	    int softclipBegin = 0;
 	    int softclipEnd = 0;
 	    if (alignment.CigarData.front().Type == Constants::BAM_CIGAR_SOFTCLIP_CHAR)
@@ -343,6 +344,10 @@ int main(int argc, char** argv) {
 
             int endpos = alignment.GetEndPosition() + softclipEnd;
             int length = endpos - (alignment.Position - softclipBegin);  // 0-based half-open interval
+		*/
+
+            int endpos = alignment.GetEndPosition();
+            int length = endpos - alignment.Position;  // 0-based half-open interval
 
             // do we meet criteria for realignment?
 
