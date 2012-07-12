@@ -508,9 +508,9 @@ int main(int argc, char** argv) {
 		//int variancesAfter = mismatchesAfter + gapsAfter + softclipsAfter;
 		//if (debug) cerr << mismatchQsumAfter + softclipQsumAfter << " ? < " << mismatchQsumBefore + softclipQsumBefore << endl;
 		if (acceptAllRealignments ||
-		    //(mismatchQsumAfter <= mismatchQsumBefore
-		    // && softclipQsumAfter <= softclipQsumBefore
-		    (mismatchQsumAfter + softclipQsumAfter <= mismatchQsumBefore + softclipQsumBefore
+		    (mismatchQsumAfter <= mismatchQsumBefore
+		     && softclipQsumAfter <= softclipQsumBefore
+		    //(mismatchQsumAfter + softclipQsumAfter <= mismatchQsumBefore + softclipQsumBefore
 		     && (softclipLimit == -1 || (softclipLimit >= 0 && softclipsAfter <= softclipLimit))
 		     && ((gapsBefore == gapsAfter && gapslenAfter <= gapslenBefore)
 			 || gapsAfter - gapsBefore <= maxGapIncrease)
