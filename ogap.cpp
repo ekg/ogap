@@ -181,7 +181,7 @@ int main(int argc, char** argv) {
             {"gap-open-penalty",  required_argument, 0, 'g'},
             {"gap-extend-penalty",  required_argument, 0, 'e'},
 	    {"entropy-gap-open", no_argument, 0, 'z'},
-	    {"repeat-gap-extend", no_argument, 0, 'R'},
+	    {"repeat-gap-extend", required_argument, 0, 'R'},
             {"suppress-output", no_argument, 0, 's'},
 	    {"accept-all", no_argument, 0, 'A'},
 	    {"max-gap-increase", required_argument, 0, 'i'},
