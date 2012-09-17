@@ -105,6 +105,7 @@ void printUsage(char** argv) {
 	 << "    -i --max-gap-increase N    Only allow the introduction of up to N gaps" << endl
 	 << "                               soft-clipped bases is >= N (default 3)" << endl
 	 << "    -M --min-mapping-quality N Only realign reasd with MQ > N (default 0)" << endl
+	 << "    -Z --zero-mapping-quality  Set mapping quality to 0 when the read would be realigned" << endl
 	 << "    -m --match-score N         The match score (default 10.0)" << endl
 	 << "    -n --mismatch-score N      The mismatch score (default -9.0)" << endl
 	 << "    -g --gap-open-penalty N    The gap open penalty (default 15.0)" << endl
@@ -155,6 +156,8 @@ int main(int argc, char** argv) {
     int minMappingQuality = 0;
 
     int softclipLimit = -1;
+
+    bool zeroMq = false;
     
     if (argc < 2) {
         printUsage(argv);
@@ -184,12 +187,13 @@ int main(int argc, char** argv) {
 	    {"max-gap-increase", required_argument, 0, 'i'},
 	    {"min-mapping-quality", required_argument, 0, 'M'},
 	    {"soft-clip-limit", required_argument, 0, 'S'},
+	    {"zero-mapping-quality", no_argument, 0, 'Z'},
             {0, 0, 0, 0}
         };
 
         int option_index = 0;
 
-        c = getopt_long (argc, argv, "hszAdf:m:n:g:e:w:c:x:R:q:C:Q:i:M:S:",
+        c = getopt_long (argc, argv, "hszZAdf:m:n:g:e:w:c:x:R:q:C:Q:i:M:S:",
                          long_options, &option_index);
 
         /* Detect the end of the options. */
@@ -232,6 +236,10 @@ int main(int argc, char** argv) {
 
             case 'S':
 		softclipLimit = atoi(optarg);
+		break;
+
+	    case 'Z':
+		zeroMq = true;
 		break;
 
 	    case 'C':
@@ -510,7 +518,7 @@ int main(int argc, char** argv) {
 		if (acceptAllRealignments ||
 		    (mismatchQsumAfter <= mismatchQsumBefore
 		     && softclipQsumAfter <= softclipQsumBefore
-		    //(mismatchQsumAfter + softclipQsumAfter <= mismatchQsumBefore + softclipQsumBefore
+		     //(mismatchQsumAfter + softclipQsumAfter <= mismatchQsumBefore + softclipQsumBefore
 		     && (softclipLimit == -1 || (softclipLimit >= 0 && softclipsAfter <= softclipLimit))
 		     && ((gapsBefore == gapsAfter && gapslenAfter <= gapslenBefore)
 			 || gapsAfter - gapsBefore <= maxGapIncrease)
@@ -533,8 +541,12 @@ int main(int argc, char** argv) {
 			cerr << alignment.AlignedBases << endl << endl;
 	            }
 		    */
-		    alignment.CigarData = cigarData;
-		    alignment.Position += alignmentStartDelta;
+		    if (zeroMq) {
+			alignment.MapQuality = 0;
+		    } else {
+			alignment.CigarData = cigarData;
+			alignment.Position += alignmentStartDelta;
+		    }
                 }
 
 		if (debug) cerr << endl;
