@@ -101,9 +101,10 @@ void printUsage(char** argv) {
 	 << "                               mismatched bases is >= N" << endl
 	 << "    -Q --soft-clip-qsum N      Trigger realignment if the sum of quality scores of" << endl
 	 << "                               soft clipped bases is >= N" << endl
+	 << "    -o --soft-clip-scaling N   Value soft clip resolutions at N relative to mismatches" << endl
+	 << "                               (default 0.3)" << endl
 	 << "    -S --soft-clip-limit N     Only accept realignments if they have <= N soft clips" << endl
 	 << "    -i --max-gap-increase N    Only allow the introduction of up to N gaps" << endl
-	 << "                               soft-clipped bases is >= N (default 3)" << endl
 	 << "    -M --min-mapping-quality N Only realign reasd with MQ > N (default 0)" << endl
 	 << "    -Z --zero-mapping-quality  Set mapping quality to 0 when the read would be realigned" << endl
 	 << "    -m --match-score N         The match score (default 10.0)" << endl
@@ -145,6 +146,7 @@ int main(int argc, char** argv) {
 
     int mismatchQualitySumThreshold = -1;
     int softclipQualitySumThreshold = -1;
+    float softclipQScaling = 0.3f;
 
     bool acceptAllRealignments = false;
 
@@ -176,6 +178,7 @@ int main(int argc, char** argv) {
 	    {"soft-clip-count", required_argument, 0, 'q'},
 	    {"mismatch-qsum", required_argument, 0, 'C'},
 	    {"soft-clip-qsum", required_argument, 0, 'Q'},
+	    {"soft-clip-scaling", required_argument, 0, 'o'},
             {"match-score",  required_argument, 0, 'm'},
             {"mismatch-score",  required_argument, 0, 'n'},
             {"gap-open-penalty",  required_argument, 0, 'g'},
@@ -193,7 +196,7 @@ int main(int argc, char** argv) {
 
         int option_index = 0;
 
-        c = getopt_long (argc, argv, "hszZAdf:m:n:g:e:w:c:x:R:q:C:Q:i:M:S:",
+        c = getopt_long (argc, argv, "hszZAdf:m:n:g:e:w:c:x:R:q:C:Q:i:M:S:o:",
                          long_options, &option_index);
 
         /* Detect the end of the options. */
@@ -256,6 +259,10 @@ int main(int argc, char** argv) {
 
             case 'Q':
 		softclipQualitySumThreshold = atoi(optarg);
+		break;
+
+            case 'o':
+		softclipQScaling = atof(optarg);
 		break;
 
 	    case 'i':
@@ -494,9 +501,14 @@ int main(int argc, char** argv) {
 		    cerr << cigar << endl;
 		    cerr << alignment.QueryBases << endl;
 		    cerr << ref.substr(referencePos, realignmentLength) << endl;
-		    cerr << "before: " << mismatchesBefore << " mismatches, " << gapsBefore << " gaps, and " << softclipsBefore << " softclips" << endl;
-		    cerr << "after:  " << mismatchesAfter << " mismatches, " << gapsAfter << " gaps, and " << softclipsAfter << " softclips" << endl;
-		    cerr << "alignment delta: " << alignmentStartDelta << " length delta " << alignmentLengthDelta << " end delta " << alignmentEndDelta << endl;
+		    cerr << "before: " << mismatchesBefore << " (" << mismatchQsumBefore << ") " << " mismatches, "
+			 << gapsBefore << " gaps, and "
+			 << softclipsBefore << " (" << softclipQsumBefore << ") " << " softclips" << endl;
+		    cerr << "after:  " << mismatchesAfter << " (" << mismatchQsumAfter << ") " << " mismatches, "
+			 << gapsAfter << " gaps, and "
+			 << softclipsAfter << " (" << softclipQsumAfter << ") " << " softclips" << endl;
+		    cerr << "alignment delta: " << alignmentStartDelta << " length delta " << alignmentLengthDelta
+			 << " end delta " << alignmentEndDelta << endl;
 		}
 
 		     /*
@@ -512,22 +524,19 @@ int main(int argc, char** argv) {
 
 		// reduce mismatches or maintain them,
 		// reduce the sum of variances in the alignment
-		//int variancesBefore = mismatchesBefore + gapsBefore + softclipsBefore;
-		//int variancesAfter = mismatchesAfter + gapsAfter + softclipsAfter;
-		//if (debug) cerr << mismatchQsumAfter + softclipQsumAfter << " ? < " << mismatchQsumBefore + softclipQsumBefore << endl;
+
+		double varQsumAfter = mismatchQsumAfter + ((double) softclipQsumAfter * softclipQScaling);
+		double varQsumBefore = mismatchQsumBefore + ((double) softclipQsumBefore * softclipQScaling);
+
 		if (acceptAllRealignments ||
-		    (mismatchQsumAfter <= mismatchQsumBefore
-		     && softclipQsumAfter <= softclipQsumBefore
-		     //(mismatchQsumAfter + softclipQsumAfter <= mismatchQsumBefore + softclipQsumBefore
+		    (varQsumAfter <= varQsumBefore
 		     && (softclipLimit == -1 || (softclipLimit >= 0 && softclipsAfter <= softclipLimit))
-		     && ((gapsBefore == gapsAfter && gapslenAfter <= gapslenBefore)
-			 || gapsAfter - gapsBefore <= maxGapIncrease)
-		     //&& variancesAfter <= variancesBefore
-		     //&& mismatchesAfter + gapsAfter <= mismatchesBefore + gapsBefore
-		     //&& (alignmentStartDelta <= flanking_window  // don't accept -pos alignments
-		     //    && alignmentEndDelta <= flanking_window
-		     //    && alignment.Position + alignmentStartDelta >= 0))) {
-			)) {
+		     && (gapsAfter < gapsBefore
+			 || gapslenAfter < gapslenBefore  // reduce gaps, or require
+			 || (varQsumAfter < varQsumBefore // strictly less than varQsum and minimal increase
+			     && gapsAfter - gapsBefore <= maxGapIncrease))
+			)
+		    ) {
 
 		    if (debug) cerr << "adjusting ... " << endl;
 		    /*
