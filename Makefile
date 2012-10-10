@@ -8,7 +8,7 @@ MYBINS = bamgrouper
 # Building binaries
 CC = gcc
 CXX = g++
-CFLAGS = -Wall -O3
+CFLAGS = -Wall -O3 -D_FILE_OFFSET_BITS=64
 #CXXFLAGS = -Wall -O3
 #LDENV = -Llib/
 #LDFLAGS = -lbamtools
@@ -17,7 +17,7 @@ LIBS = -lz -lm -lbamtools
 BAMTOOLS_ROOT=bamtools
 BAMTOOLS_LIB_DIR=bamtools/lib
 
-CXXFLAGS=-Wall -O3 -I$(BAMTOOLS_ROOT)/include -L./ #-L$(BAMTOOLS_ROOT)/lib
+CXXFLAGS=-Wall -O3 -D_FILE_OFFSET_BITS=64 -I$(BAMTOOLS_ROOT)/include -L./ #-L$(BAMTOOLS_ROOT)/lib
 
 SMITHWATERMAN = smithwaterman/SmithWatermanGotoh.o
 REPEATS = smithwaterman/Repeats.o
