@@ -17,7 +17,7 @@ LIBS = -lz -lm -lbamtools
 BAMTOOLS_ROOT=bamtools
 BAMTOOLS_LIB_DIR=bamtools/lib
 
-CXXFLAGS=-Wall -O3 -D_FILE_OFFSET_BITS=64 -I$(BAMTOOLS_ROOT)/include -L./ #-L$(BAMTOOLS_ROOT)/lib
+CXXFLAGS=-Wall -O3 -D_FILE_OFFSET_BITS=64
 
 SMITHWATERMAN = smithwaterman/SmithWatermanGotoh.o
 REPEATS = smithwaterman/Repeats.o
