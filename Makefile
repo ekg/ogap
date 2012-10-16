@@ -12,12 +12,12 @@ CFLAGS = -Wall -O3 -D_FILE_OFFSET_BITS=64
 #CXXFLAGS = -Wall -O3
 #LDENV = -Llib/
 #LDFLAGS = -lbamtools
-LIBS = -lz -lm -lbamtools
+LIBS =  -lm -L. -lbamtools -lz 
 
 BAMTOOLS_ROOT=bamtools
 BAMTOOLS_LIB_DIR=bamtools/lib
 
-CXXFLAGS=-Wall -O3 -D_FILE_OFFSET_BITS=64
+CXXFLAGS=-Wall -O3 -D_FILE_OFFSET_BITS=64 -Ibamtools/include
 
 SMITHWATERMAN = smithwaterman/SmithWatermanGotoh.o
 REPEATS = smithwaterman/Repeats.o
